@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -12,6 +11,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use ghostty_vt::{Callbacks, Terminal};
+use mux_core::platform::transport;
 use mux_core::{DefaultColors, MuxEvent, Rgb, SurfaceId, SurfaceKind};
 use serde_json::{json, Value};
 
@@ -56,7 +56,7 @@ impl RemoteSurface {
 }
 
 pub struct RemoteSession {
-    writer: Mutex<UnixStream>,
+    writer: Mutex<Box<dyn transport::Stream>>,
     pending: Mutex<HashMap<u64, Sender<Value>>>,
     next_id: AtomicU64,
     surfaces: Mutex<HashMap<SurfaceId, Arc<RemoteSurface>>>,
@@ -67,10 +67,10 @@ pub struct RemoteSession {
 
 impl RemoteSession {
     pub fn connect(path: &Path) -> anyhow::Result<Arc<Self>> {
-        let stream = UnixStream::connect(path).map_err(|e| {
+        let stream = transport::connect(path).map_err(|e| {
             anyhow::anyhow!("cannot connect to session socket {}: {e}", path.display())
         })?;
-        let read_half = stream.try_clone()?;
+        let read_half = stream.try_clone_box()?;
         let session = Arc::new(RemoteSession {
             writer: Mutex::new(stream),
             pending: Mutex::new(HashMap::new()),

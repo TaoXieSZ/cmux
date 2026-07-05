@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use ghostty_vt::RenderState;
 use mux_core::platform::transport;
-use mux_core::{DefaultColors, Mux, MuxEvent, Rgb, SurfaceOptions};
+use mux_core::{AttachFrame, DefaultColors, Mux, MuxEvent, Rgb, SurfaceOptions};
 
 fn wait_for<T>(mut f: impl FnMut() -> Option<T>, timeout: Duration) -> Option<T> {
     let start = Instant::now();
@@ -200,6 +200,35 @@ fn control_socket_round_trip() {
     reader.read_line(&mut line).unwrap();
     let v: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(v["ok"], true, "new-tab failed: {line}");
+    let second_tab = v["data"]["surface"].as_u64().unwrap();
+
+    line.clear();
+    writeln!(
+        writer,
+        r#"{{"id":81,"cmd":"move-tab","surface":{surface_id},"pane":{pane_id},"index":2}}"#
+    )
+    .unwrap();
+    reader.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["ok"], true, "move-tab failed: {line}");
+
+    line.clear();
+    writeln!(writer, r#"{{"id":82,"cmd":"list-workspaces"}}"#).unwrap();
+    reader.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let tabs = v["data"]["workspaces"][0]["screens"][0]["panes"][0]["tabs"].as_array().unwrap();
+    assert_eq!(tabs[0]["surface"], second_tab);
+    assert_eq!(tabs[1]["surface"], surface_id);
+
+    line.clear();
+    writeln!(
+        writer,
+        r#"{{"id":83,"cmd":"move-tab","surface":{surface_id},"pane":{pane_id},"index":2}}"#
+    )
+    .unwrap();
+    reader.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["ok"], true, "same-position move-tab failed: {line}");
 
     // Split and resize the split ratio over the socket.
     line.clear();
@@ -234,6 +263,34 @@ fn control_socket_round_trip() {
     assert!((ratio - 0.7).abs() < 0.0001, "layout ratio was {ratio}");
     assert_eq!(ws["screens"].as_array().unwrap().len(), 2);
     assert_eq!(ws["screens"][1]["active"], true);
+
+    line.clear();
+    writeln!(writer, r#"{{"id":12,"cmd":"new-workspace","name":"second"}}"#).unwrap();
+    reader.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["ok"], true, "new-workspace failed: {line}");
+
+    line.clear();
+    writeln!(writer, r#"{{"id":13,"cmd":"move-workspace","workspace":{ws_id},"index":2}}"#)
+        .unwrap();
+    reader.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["ok"], true, "move-workspace failed: {line}");
+
+    line.clear();
+    writeln!(writer, r#"{{"id":14,"cmd":"list-workspaces"}}"#).unwrap();
+    reader.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let workspaces = v["data"]["workspaces"].as_array().unwrap();
+    assert_eq!(workspaces.len(), 2);
+    assert_eq!(workspaces[1]["id"], ws_id);
+
+    line.clear();
+    writeln!(writer, r#"{{"id":15,"cmd":"move-workspace","workspace":{ws_id},"index":1}}"#)
+        .unwrap();
+    reader.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["ok"], true, "same-position move-workspace failed: {line}");
 
     // Wait for the marker to hit the screen, then read it over the socket.
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -442,17 +499,76 @@ fn attach_stream_replays_then_streams_without_duplication() {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match attach.stream.recv_timeout(Duration::from_millis(200)) {
-            Ok(chunk) => {
+            Ok(AttachFrame::Output(chunk)) => {
                 mirror.vt_write(&chunk);
                 if mirror.plain_text().unwrap().contains("after-attach") {
                     break;
                 }
+            }
+            Ok(AttachFrame::Resized { cols, rows, replay }) => {
+                assert!(!replay.is_empty());
+                mirror =
+                    ghostty_vt::Terminal::new(cols, rows, 1000, ghostty_vt::Callbacks::default())
+                        .unwrap();
+                mirror.vt_write(&replay);
             }
             Err(_) => assert!(Instant::now() < deadline, "stream never delivered output"),
         }
     }
     let text = mirror.plain_text().unwrap();
     assert_eq!(text.matches("before-attach").count(), 1, "duplicated replay: {text}");
+
+    mux.close_surface(surface.id);
+}
+
+#[test]
+fn attach_stream_orders_resize_between_output_frames() {
+    let mux = Mux::new(unique_session("test-attach-resize"), shell_opts("cat"));
+    let surface = mux.new_workspace(None, None).unwrap();
+    let attach = surface.attach_stream().unwrap();
+
+    surface.write_bytes(b"before-resize\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match attach.stream.recv_timeout(Duration::from_millis(200)) {
+            Ok(AttachFrame::Output(bytes))
+                if bytes.windows(b"before-resize".len()).any(|w| w == b"before-resize") =>
+            {
+                break
+            }
+            Ok(_) => {}
+            Err(_) => assert!(Instant::now() < deadline, "before output never arrived"),
+        }
+    }
+
+    mux.resize_surface(surface.id, 100, 40).unwrap();
+    let resized = wait_for(
+        || match attach.stream.recv_timeout(Duration::from_millis(200)) {
+            Ok(AttachFrame::Resized { cols, rows, replay }) => {
+                assert!(!replay.is_empty());
+                Some((cols, rows))
+            }
+            Ok(_) | Err(_) => None,
+        },
+        Duration::from_secs(5),
+    )
+    .expect("resize marker");
+    assert_eq!(resized, (100, 40));
+
+    surface.write_bytes(b"after-resize\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match attach.stream.recv_timeout(Duration::from_millis(200)) {
+            Ok(AttachFrame::Output(bytes))
+                if bytes.windows(b"after-resize".len()).any(|w| w == b"after-resize") =>
+            {
+                break
+            }
+            Ok(AttachFrame::Resized { .. }) => panic!("unexpected second resize marker"),
+            Ok(_) => {}
+            Err(_) => assert!(Instant::now() < deadline, "after output never arrived"),
+        }
+    }
 
     mux.close_surface(surface.id);
 }

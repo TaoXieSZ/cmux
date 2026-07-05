@@ -244,20 +244,19 @@ impl Prompt {
     }
 }
 
-/// A text selection in one surface, in viewport cell coordinates
-/// relative to the pane content rect. `anchor` is where the drag
-/// started; `head` follows the mouse. Viewport-anchored: scrolling the
-/// surface clears it.
+/// A text selection in one surface. Rows are absolute scrollback rows:
+/// viewport row + scrollbar offset at capture time, so the selection
+/// remains stable while the viewport scrolls.
 #[derive(Debug, Clone, Copy)]
 pub struct Selection {
     pub surface: SurfaceId,
-    pub anchor: (u16, u16),
-    pub head: (u16, u16),
+    pub anchor: (u16, u64),
+    pub head: (u16, u64),
 }
 
 impl Selection {
     /// Normalized (start, end) in row-major order, inclusive.
-    pub fn range(&self) -> ((u16, u16), (u16, u16)) {
+    pub fn range(&self) -> ((u16, u64), (u16, u64)) {
         let a = (self.anchor.1, self.anchor.0);
         let h = (self.head.1, self.head.0);
         if a <= h {
@@ -267,8 +266,10 @@ impl Selection {
         }
     }
 
-    /// Whether a viewport cell is inside the (linear) selection.
-    pub fn contains(&self, x: u16, y: u16) -> bool {
+    /// Whether a viewport cell is inside the (linear) selection at the
+    /// current scrollbar offset.
+    pub fn contains_viewport(&self, x: u16, y: u16, offset: u64) -> bool {
+        let y = offset + y as u64;
         let ((sx, sy), (ex, ey)) = self.range();
         if y < sy || y > ey {
             return false;
@@ -286,10 +287,24 @@ impl Selection {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TabDragView {
+    pub surface: SurfaceId,
+    pub target: Option<(PaneId, usize)>,
+}
+
 /// Mouse drag in progress.
 enum Drag {
+    /// Left press on a tab chip; becomes `Tab` after moving cells.
+    TabArm { surface: SurfaceId, at: (u16, u16) },
+    /// Tab drag with the current drop target.
+    Tab { surface: SurfaceId, target: Option<(PaneId, usize)> },
+    /// Left press on a workspace entry; becomes `Workspace` after moving cells.
+    WorkspaceArm { workspace: WorkspaceId, at: (u16, u16) },
+    /// Workspace drag with the current insertion index.
+    Workspace { workspace: WorkspaceId, target: Option<usize> },
     /// Text selection inside a pane's content rect.
-    Select { content: Rect },
+    Select { content: Rect, auto_scroll: Option<i8>, col: u16 },
     /// Browser mouse drag inside a pane's content rect.
     Browser { surface: SurfaceId, content: Rect },
     /// Scrollbar thumb drag.
@@ -309,7 +324,6 @@ pub struct App {
     pub graphics_supported: bool,
     pub pane_areas: Vec<PaneArea>,
     pub prefix_armed: bool,
-    pub session_label: String,
     pub sidebar_visible: bool,
     /// Width of the sidebar in the current frame (0 when hidden).
     pub sidebar_width: u16,
@@ -378,7 +392,51 @@ fn content_size_for_rect(rect: Rect, scrollbar: ScrollbarPosition) -> Option<(u1
     }
 }
 
-pub fn run(session: Session, session_label: String) -> anyhow::Result<()> {
+fn cell_height_width_ratio(cell_pixels: (u16, u16)) -> u16 {
+    let (width, height) = cell_pixels;
+    if width == 0 || height == 0 {
+        return 4;
+    }
+    ((height as f32 / width as f32).round() as u16).max(1)
+}
+
+fn zellij_smart_direction(content: Rect, ratio: u16) -> Option<SplitDir> {
+    let rows = content.height as u32;
+    let cols = content.width as u32;
+    let ratio = ratio as u32;
+    if rows.saturating_mul(ratio) > cols && rows > 20 {
+        Some(SplitDir::Down)
+    } else if cols > 60 {
+        Some(SplitDir::Right)
+    } else {
+        None
+    }
+}
+
+fn smart_split_target(
+    areas: &[PaneArea],
+    focused: Option<PaneId>,
+    cell_pixels: (u16, u16),
+) -> Option<(PaneId, SplitDir)> {
+    let ratio = cell_height_width_ratio(cell_pixels);
+    if let Some(area) = focused.and_then(|pane| areas.iter().find(|area| area.pane == pane)) {
+        if let Some(dir) = zellij_smart_direction(area.content, ratio) {
+            return Some((area.pane, dir));
+        }
+    }
+    areas
+        .iter()
+        .filter_map(|area| {
+            zellij_smart_direction(area.content, ratio).map(|dir| {
+                let area_score = area.content.width as u32 * area.content.height as u32;
+                (area_score, area.pane, dir)
+            })
+        })
+        .max_by_key(|(area_score, _, _)| *area_score)
+        .map(|(_, pane, dir)| (pane, dir))
+}
+
+pub fn run(session: Session, _session_label: String) -> anyhow::Result<()> {
     let config = crate::config::load();
     // First workspace before the terminal switches modes, so a spawn
     // failure prints a normal error. Spawn at the size the first pane
@@ -468,7 +526,6 @@ pub fn run(session: Session, session_label: String) -> anyhow::Result<()> {
         graphics_supported,
         pane_areas: Vec::new(),
         prefix_armed: false,
-        session_label,
         sidebar_visible: true,
         sidebar_width: 0,
         sidebar_width_override: None,
@@ -522,7 +579,7 @@ impl App {
         while !self.quit {
             // Block for the first event, then drain whatever queued so a
             // torrent of pty output coalesces into one frame.
-            let timeout = if self.shake_frames > 0 {
+            let timeout = if self.shake_frames > 0 || self.selection_auto_scroll_active() {
                 Duration::from_millis(30)
             } else {
                 Duration::from_millis(250)
@@ -532,6 +589,7 @@ impl App {
                 Ok(event) => Some(event),
                 Err(RecvTimeoutError::Timeout) => {
                     needs_draw = self.shake_frames > 0;
+                    needs_draw |= self.auto_scroll_selection_tick();
                     None
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -703,6 +761,10 @@ impl App {
                 }
                 Ok(HandleOutcome::new(true, false))
             }
+            AppEvent::Mux(MuxEvent::SurfaceResized { surface, .. }) => {
+                self.render_states.remove(&surface);
+                Ok(HandleOutcome::new(true, false))
+            }
             AppEvent::Mux(_) => Ok(HandleOutcome::new(true, false)),
             AppEvent::Input(Event::Key(key)) => {
                 let user_interaction = key.kind != KeyEventKind::Release;
@@ -734,6 +796,7 @@ impl App {
             }
             AppEvent::Input(Event::Resize(_, _)) => {
                 self.refresh_cell_pixels(false);
+                self.render_states.clear();
                 Ok(HandleOutcome::new(true, true))
             }
             AppEvent::Input(_) => Ok(HandleOutcome::new(false, false)),
@@ -777,6 +840,54 @@ impl App {
         }
     }
 
+    pub fn tab_drag(&self) -> Option<TabDragView> {
+        match self.drag {
+            Some(Drag::Tab { surface, target }) => Some(TabDragView { surface, target }),
+            _ => None,
+        }
+    }
+
+    pub fn workspace_drag(&self) -> Option<(WorkspaceId, Option<usize>)> {
+        match self.drag {
+            Some(Drag::Workspace { workspace, target }) => Some((workspace, target)),
+            _ => None,
+        }
+    }
+
+    pub fn surface_scroll_offset(&self, surface: SurfaceId) -> u64 {
+        self.session
+            .surface(surface)
+            .and_then(|surface| surface.with_terminal(|t| t.scrollbar().map(|sb| sb.offset)))
+            .flatten()
+            .unwrap_or(0)
+    }
+
+    fn selection_auto_scroll_active(&self) -> bool {
+        matches!(self.drag, Some(Drag::Select { auto_scroll: Some(_), .. }))
+    }
+
+    fn auto_scroll_selection_tick(&mut self) -> bool {
+        let Some(Drag::Select { content, auto_scroll: Some(dir), col }) = self.drag else {
+            return false;
+        };
+        let Some(surface_id) = self.selection.map(|sel| sel.surface) else { return false };
+        let Some(surface) = self.session.surface(surface_id) else { return false };
+        let moved = surface
+            .with_terminal(|t| {
+                let before = t.scrollbar().map(|sb| sb.offset).unwrap_or(0);
+                t.scroll_delta(dir as isize);
+                let after = t.scrollbar().map(|sb| sb.offset).unwrap_or(0);
+                before != after
+            })
+            .unwrap_or(false);
+        let edge_row = if dir < 0 { 0 } else { content.height.saturating_sub(1) };
+        let offset = self.surface_scroll_offset(surface_id);
+        if let Some(sel) = self.selection.as_mut() {
+            sel.head = (col.min(content.width.saturating_sub(1)), offset + edge_row as u64);
+        }
+        moved
+    }
+
     /// Content size for a pane filling `rect`.
     fn size_of_rect(&self, rect: Rect) -> Option<(u16, u16)> {
         content_size_for_rect(rect, self.config.scrollbar.position)
@@ -795,14 +906,10 @@ impl App {
     }
 
     fn new_pane_smart(&mut self) -> anyhow::Result<()> {
-        let Some(pane) = self.active_pane() else { return Ok(()) };
-        let Some(area) = self.pane_areas.iter().find(|area| area.pane == pane) else {
+        let Some((pane, dir)) =
+            smart_split_target(&self.pane_areas, self.active_pane(), self.cell_pixels)
+        else {
             return Ok(());
-        };
-        let dir = if area.content.width > area.content.height.saturating_mul(2) {
-            SplitDir::Right
-        } else {
-            SplitDir::Down
         };
         self.split_pane(pane, dir)
     }
@@ -1132,11 +1239,6 @@ impl App {
             }
             let _ = surface.with_terminal(|t| t.scroll_delta(delta));
         }
-        if let (Some(sel), Some(active)) = (self.selection, self.active_surface()) {
-            if sel.surface == active {
-                self.selection = None;
-            }
-        }
     }
 
     fn forward_key(&mut self, key: &KeyEvent) {
@@ -1208,6 +1310,67 @@ impl App {
 
     fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
         self.hits.iter().find(|(rect, _)| rect.contains(x, y)).map(|(_, hit)| *hit)
+    }
+
+    fn tab_drop_target_at(&self, x: u16, y: u16) -> Option<(PaneId, usize)> {
+        let area =
+            self.pane_areas.iter().find(|area| area.bar.is_some_and(|bar| bar.contains(x, y)))?;
+        let pane = self.tree.pane(area.pane)?;
+        let len = pane.tabs.len();
+        let mut tab_hits = self
+            .hits
+            .iter()
+            .filter_map(|(rect, hit)| match hit {
+                Hit::Tab { pane, index } if *pane == area.pane => Some((*rect, *index)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        tab_hits.sort_by_key(|(rect, index)| (rect.x, *index));
+        for (rect, index) in &tab_hits {
+            let mid = rect.x + rect.width / 2;
+            if x < mid {
+                return Some((area.pane, (*index).min(len)));
+            }
+            if rect.contains(x, y) {
+                return Some((area.pane, (index + 1).min(len)));
+            }
+        }
+        Some((area.pane, len))
+    }
+
+    fn workspace_drop_target_at(&self, x: u16, y: u16) -> Option<usize> {
+        if self.sidebar_width < 3 || x >= self.sidebar_width.saturating_sub(1) {
+            return None;
+        }
+        let len = self.tree.workspaces.len();
+        for index in 0..len {
+            let start = 2 + index as u16 * 3;
+            if y < start {
+                return Some(index);
+            }
+            if y <= start + 1 {
+                return Some(if y == start { index } else { index + 1 }.min(len));
+            }
+        }
+        Some(len)
+    }
+
+    fn tab_location(&self, surface: SurfaceId) -> Option<(PaneId, usize)> {
+        self.tree
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.screens.iter())
+            .flat_map(|screen| screen.panes.iter())
+            .find_map(|pane| {
+                pane.tabs
+                    .iter()
+                    .position(|tab| tab.surface == surface)
+                    .map(|index| (pane.id, index))
+            })
+    }
+
+    fn workspace_index(&self, workspace: WorkspaceId) -> Option<usize> {
+        self.tree.workspaces.iter().position(|ws| ws.id == workspace)
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) -> anyhow::Result<bool> {
@@ -1352,8 +1515,8 @@ impl App {
 
         if let Some(hit) = self.hit_at(x, y) {
             match hit {
-                Hit::Workspace { index, .. } => {
-                    self.session.select_workspace(Some(index), None);
+                Hit::Workspace { id, .. } => {
+                    self.drag = Some(Drag::WorkspaceArm { workspace: id, at: (x, y) });
                 }
                 Hit::NewWorkspace => self.new_workspace()?,
                 Hit::ScreenEntry { index, .. } => {
@@ -1361,8 +1524,14 @@ impl App {
                 }
                 Hit::NewScreen => self.new_screen()?,
                 Hit::Tab { pane, index } => {
-                    self.session.focus_pane(pane);
-                    self.session.select_tab(Some(pane), Some(index), None);
+                    if let Some(surface) = self
+                        .tree
+                        .pane(pane)
+                        .and_then(|pane| pane.tabs.get(index))
+                        .map(|t| t.surface)
+                    {
+                        self.drag = Some(Drag::TabArm { surface, at: (x, y) });
+                    }
                 }
                 Hit::NewTab { pane } => {
                     self.session.focus_pane(pane);
@@ -1390,10 +1559,15 @@ impl App {
                 } else {
                     // Begin a text selection; it becomes visible once the
                     // mouse moves to a second cell.
-                    let cell = (x - area.content.x, y - area.content.y);
+                    let offset = self.surface_scroll_offset(area.surface);
+                    let cell = (x - area.content.x, offset + (y - area.content.y) as u64);
                     self.selection =
                         Some(Selection { surface: area.surface, anchor: cell, head: cell });
-                    self.drag = Some(Drag::Select { content: area.content });
+                    self.drag = Some(Drag::Select {
+                        content: area.content,
+                        auto_scroll: None,
+                        col: x - area.content.x,
+                    });
                 }
             }
             return Ok(true);
@@ -1403,13 +1577,51 @@ impl App {
 
     fn handle_left_drag(&mut self, x: u16, y: u16) -> anyhow::Result<bool> {
         match &self.drag {
-            Some(Drag::Select { content }) => {
+            Some(Drag::TabArm { surface, at, .. }) => {
+                let (surface, at) = (*surface, *at);
+                if (x, y) != at {
+                    let target = self.tab_drop_target_at(x, y);
+                    self.drag = Some(Drag::Tab { surface, target });
+                }
+                Ok(true)
+            }
+            Some(Drag::Tab { surface, .. }) => {
+                let surface = *surface;
+                let target = self.tab_drop_target_at(x, y);
+                self.drag = Some(Drag::Tab { surface, target });
+                Ok(true)
+            }
+            Some(Drag::WorkspaceArm { workspace, at, .. }) => {
+                let (workspace, at) = (*workspace, *at);
+                if (x, y) != at {
+                    let target = self.workspace_drop_target_at(x, y);
+                    self.drag = Some(Drag::Workspace { workspace, target });
+                }
+                Ok(true)
+            }
+            Some(Drag::Workspace { workspace, .. }) => {
+                let workspace = *workspace;
+                let target = self.workspace_drop_target_at(x, y);
+                self.drag = Some(Drag::Workspace { workspace, target });
+                Ok(true)
+            }
+            Some(Drag::Select { content, .. }) => {
                 let content = *content;
                 let cx = x.clamp(content.x, content.x + content.width.saturating_sub(1));
                 let cy = y.clamp(content.y, content.y + content.height.saturating_sub(1));
+                let offset =
+                    self.selection.map(|sel| self.surface_scroll_offset(sel.surface)).unwrap_or(0);
                 if let Some(sel) = self.selection.as_mut() {
-                    sel.head = (cx - content.x, cy - content.y);
+                    sel.head = (cx - content.x, offset + (cy - content.y) as u64);
                 }
+                let auto_scroll = if y <= content.y {
+                    Some(-1)
+                } else if y >= content.y + content.height.saturating_sub(1) {
+                    Some(1)
+                } else {
+                    None
+                };
+                self.drag = Some(Drag::Select { content, auto_scroll, col: cx - content.x });
                 Ok(true)
             }
             Some(Drag::Browser { surface, content }) => {
@@ -1448,6 +1660,35 @@ impl App {
     }
 
     fn handle_left_up(&mut self, x: u16, y: u16) -> anyhow::Result<bool> {
+        if let Some(Drag::TabArm { surface, .. }) = self.drag {
+            self.drag = None;
+            if let Some((pane, index)) = self.tab_location(surface) {
+                self.session.focus_pane(pane);
+                self.session.select_tab(Some(pane), Some(index), None);
+            }
+            return Ok(true);
+        }
+        if let Some(Drag::Tab { surface, .. }) = self.drag {
+            self.drag = None;
+            if let Some((pane, index)) = self.tab_drop_target_at(x, y) {
+                self.session.move_tab(surface, pane, index);
+            }
+            return Ok(true);
+        }
+        if let Some(Drag::WorkspaceArm { workspace, .. }) = self.drag {
+            self.drag = None;
+            if let Some(index) = self.workspace_index(workspace) {
+                self.session.select_workspace(Some(index), None);
+            }
+            return Ok(true);
+        }
+        if let Some(Drag::Workspace { workspace, .. }) = self.drag {
+            self.drag = None;
+            if let Some(index) = self.workspace_drop_target_at(x, y) {
+                self.session.move_workspace(workspace, index);
+            }
+            return Ok(true);
+        }
         if let Some(Drag::Browser { surface, content }) = self.drag {
             self.drag = None;
             let cx = x.clamp(content.x, content.x + content.width.saturating_sub(1));
@@ -1479,7 +1720,8 @@ impl App {
     fn copy_selection(&mut self, sel: Selection) {
         let Some(surface) = self.session.surface(sel.surface) else { return };
         let (start, end) = sel.range();
-        let Some(text) = surface.with_terminal(|t| t.selection_text(start, end)).flatten() else {
+        let Some(text) = surface.with_terminal(|t| t.selection_text_absolute(start, end)).flatten()
+        else {
             return;
         };
         if text.is_empty() {
@@ -1503,7 +1745,6 @@ impl App {
     fn start_scrollbar_drag(&mut self, surface: SurfaceId, track: Rect, y: u16) {
         let Some(handle) = self.session.surface(surface) else { return };
         let mut anchor_offset = None;
-        let mut moved = false;
         let _ = handle.with_terminal(|t| {
             let Some(sb) = t.scrollbar() else { return };
             let rel_y = y.saturating_sub(track.y).min(track.height.saturating_sub(1));
@@ -1516,14 +1757,10 @@ impl App {
                 let delta = target - sb.offset as i64;
                 if delta != 0 {
                     t.scroll_delta(delta as isize);
-                    moved = true;
                 }
             }
             anchor_offset = t.scrollbar().map(|after| after.offset);
         });
-        if moved && self.selection.is_some_and(|s| s.surface == surface) {
-            self.selection = None;
-        }
         if let Some(anchor_offset) = anchor_offset {
             self.drag = Some(Drag::Scrollbar { surface, track, anchor_y: y, anchor_offset });
         }
@@ -1539,7 +1776,6 @@ impl App {
         y: u16,
     ) {
         let Some(handle) = self.session.surface(surface) else { return };
-        let mut moved = false;
         handle.with_terminal(|t| {
             let Some(sb) = t.scrollbar() else { return };
             let (_, thumb_len) = thumb_geometry(&sb, track.height);
@@ -1552,12 +1788,8 @@ impl App {
             let scroll_delta = target - current;
             if scroll_delta != 0 {
                 t.scroll_delta(scroll_delta as isize);
-                moved = true;
             }
         });
-        if moved && self.selection.is_some_and(|s| s.surface == surface) {
-            self.selection = None;
-        }
     }
 
     fn resize_focused_split(&mut self, delta: f32) {
@@ -1716,10 +1948,6 @@ impl App {
             let seq: &[u8] = if down { b"\x1b[B\x1b[B\x1b[B" } else { b"\x1b[A\x1b[A\x1b[A" };
             surface.write_bytes(seq);
         }
-        // The viewport moved: a viewport-anchored selection is stale.
-        if self.selection.is_some_and(|s| s.surface == surface_id) {
-            self.selection = None;
-        }
         Ok(true)
     }
 
@@ -1790,5 +2018,41 @@ fn browser_key_mapping(
         KeyCode::PageDown => Some(("PageDown", "PageDown", 34, None)),
         KeyCode::Delete => Some(("Delete", "Delete", 46, None)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn area(pane: PaneId, width: u16, height: u16) -> PaneArea {
+        PaneArea {
+            pane,
+            surface: pane,
+            rect: Rect { x: 0, y: 0, width, height },
+            bar: None,
+            content: Rect { x: 0, y: 0, width, height },
+            track: None,
+        }
+    }
+
+    #[test]
+    fn zellij_smart_direction_uses_cell_ratio_and_minimums() {
+        assert_eq!(
+            zellij_smart_direction(Rect { x: 0, y: 0, width: 80, height: 21 }, 4),
+            Some(SplitDir::Down)
+        );
+        assert_eq!(
+            zellij_smart_direction(Rect { x: 0, y: 0, width: 80, height: 20 }, 4),
+            Some(SplitDir::Right)
+        );
+        assert_eq!(zellij_smart_direction(Rect { x: 0, y: 0, width: 60, height: 20 }, 4), None);
+        assert_eq!(cell_height_width_ratio((0, 0)), 4);
+    }
+
+    #[test]
+    fn smart_split_falls_back_to_largest_selectable_pane() {
+        let areas = [area(1, 40, 10), area(2, 80, 10), area(3, 30, 30)];
+        assert_eq!(smart_split_target(&areas, Some(1), (8, 16)), Some((3, SplitDir::Down)));
     }
 }

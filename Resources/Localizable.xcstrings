@@ -220561,6 +220561,286 @@
           }
         }
       }
+    },
+    "settings.computerUse.accessibility.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Accessibility" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティ" } }
+      }
+    },
+    "settings.computerUse.driver.error.eof": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cua-driver closed stdout before the handshake completed." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ハンドシェイクが完了する前に cua-driver が stdout を閉じました。" } }
+      }
+    },
+    "settings.computerUse.driver.error.initialize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cua-driver returned an invalid initialize response." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "cua-driver が無効な initialize 応答を返しました。" } }
+      }
+    },
+    "settings.computerUse.driver.error.json": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cua-driver returned invalid JSON." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "cua-driver が無効な JSON を返しました。" } }
+      }
+    },
+    "settings.computerUse.driver.error.timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Timed out waiting for cua-driver." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "cua-driver の応答待ちがタイムアウトしました。" } }
+      }
+    },
+    "settings.computerUse.driver.error.tools": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cua-driver returned an invalid tools/list response." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "cua-driver が無効な tools/list 応答を返しました。" } }
+      }
+    },
+    "settings.computerUse.driver.error.utf8": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cua-driver returned non-UTF-8 output." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "cua-driver が UTF-8 ではない出力を返しました。" } }
+      }
+    },
+    "settings.computerUse.driver.notFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not found. Tried %@." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "見つかりません。%@ を確認しました。" } }
+      }
+    },
+    "settings.computerUse.driver.path": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Driver Path" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ドライバーパス" } }
+      }
+    },
+    "settings.computerUse.driver.path.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Optional development override. Leave empty to try the environment variable, app helper, then /Applications/CuaDriver.app." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "開発用の任意の上書きです。空のままにすると、環境変数、アプリヘルパー、/Applications/CuaDriver.app の順に試します。" } }
+      }
+    },
+    "settings.computerUse.driver.path.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "/path/to/cua-driver" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "/path/to/cua-driver" } }
+      }
+    },
+    "settings.computerUse.driver.resolved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Resolved %@ from %@." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@ を %@ から解決しました。" } }
+      }
+    },
+    "settings.computerUse.driver.runningInfo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Running Info" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "実行情報" } }
+      }
+    },
+    "settings.computerUse.driver.runningInfo.pidOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "PID %lld, %lld tools." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "PID %lld、%lld 個のツール。" } }
+      }
+    },
+    "settings.computerUse.driver.runningInfo.server": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%@, PID %lld, %lld tools." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@、PID %lld、%lld 個のツール。" } }
+      }
+    },
+    "settings.computerUse.driver.source.applications": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "/Applications/CuaDriver.app" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "/Applications/CuaDriver.app" } }
+      }
+    },
+    "settings.computerUse.driver.source.bundleHelper": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "app helper" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "アプリヘルパー" } }
+      }
+    },
+    "settings.computerUse.driver.source.environment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "CMUX_CUA_DRIVER_PATH" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "CMUX_CUA_DRIVER_PATH" } }
+      }
+    },
+    "settings.computerUse.driver.source.setting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "computerUse.driverPath" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "computerUse.driverPath" } }
+      }
+    },
+    "settings.computerUse.driver.start": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Start" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "開始" } }
+      }
+    },
+    "settings.computerUse.driver.status.exited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "cua-driver exited with status %lld." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "cua-driver がステータス %lld で終了しました。" } }
+      }
+    },
+    "settings.computerUse.driver.status.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Status: failed. %@" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "状態: 失敗。%@" } }
+      }
+    },
+    "settings.computerUse.driver.status.notFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Status: not found." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "状態: 見つかりません。" } }
+      }
+    },
+    "settings.computerUse.driver.status.running": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Status: running." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "状態: 実行中。" } }
+      }
+    },
+    "settings.computerUse.driver.status.starting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Status: starting." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "状態: 起動中。" } }
+      }
+    },
+    "settings.computerUse.driver.status.stopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Status: stopped." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "状態: 停止中。" } }
+      }
+    },
+    "settings.computerUse.driver.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Stop" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "停止" } }
+      }
+    },
+    "settings.computerUse.driver.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Driver" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ドライバー" } }
+      }
+    },
+    "settings.computerUse.driver.toolCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld tools" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%lld 個のツール" } }
+      }
+    },
+    "settings.computerUse.permission.grant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Grant" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "許可" } }
+      }
+    },
+    "settings.computerUse.permission.granted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Granted" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "許可済み" } }
+      }
+    },
+    "settings.computerUse.permission.notGranted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not granted" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "未許可" } }
+      }
+    },
+    "settings.computerUse.permission.openSystemSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open System Settings" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "システム設定を開く" } }
+      }
+    },
+    "settings.computerUse.screenRecording.relaunchHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "After granting Screen Recording, relaunch cmux for the permission to take effect." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "画面収録を許可した後、権限を有効にするには cmux を再起動してください。" } }
+      }
+    },
+    "settings.computerUse.screenRecording.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Screen Recording" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "画面収録" } }
+      }
+    },
+    "settings.search.alias.section.computerUse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "computer use cua driver accessibility screen recording capture mcp tools" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "computer use cua driver accessibility screen recording capture mcp tools コンピュータ使用 アクセシビリティ 画面収録 キャプチャ 権限 ツール" } }
+      }
+    },
+    "settings.search.alias.setting.computerUse.accessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "accessibility permission privacy grant trusted input click keyboard mouse system settings" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "accessibility permission privacy grant trusted input click keyboard mouse system settings アクセシビリティ 権限 プライバシー 許可 入力 クリック キーボード マウス システム設定" } }
+      }
+    },
+    "settings.search.alias.setting.computerUse.driver-path": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "computerUse.driverPath cua driver binary executable path mcp no daemon relaunch" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "computerUse.driverPath cua driver binary executable path mcp no daemon relaunch ドライバー バイナリ 実行ファイル パス" } }
+      }
+    },
+    "settings.search.alias.setting.computerUse.screen-recording": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "screen recording screen capture permission privacy grant relaunch system settings" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "screen recording screen capture permission privacy grant relaunch system settings 画面収録 画面キャプチャ 権限 プライバシー 許可 再起動 システム設定" } }
+      }
+    },
+    "settings.section.computerUse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Computer Use" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "コンピュータ使用" } }
+      }
     }
   },
   "version": "1.0"
